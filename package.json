@@ -1,0 +1,60 @@
+{
+  "name": "rivals-mod-manager",
+  "productName": "Marvel Rivals Mod Manager",
+  "version": "3.2.0",
+  "description": "A Marvel Rivals mod manager with Nexus Mods integration",
+  "main": "electron/main.js",
+  "author": "chroma",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "vite build",
+    "start": "npm run build && electron .",
+    "dist": "npm run build && electron-builder",
+    "check": "node --check electron/main.js && node --check electron/preload.js && node --test tests/*.test.js"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^43.1.1",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.2"
+  },
+  "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
+    "@fontsource/nunito-sans": "^5.2.7",
+    "@fontsource/oswald": "^5.1.1",
+    "7zip-bin": "^5.2.0",
+    "adm-zip": "^0.5.16",
+    "node-7z": "^3.0.0",
+    "node-unrar-js": "^2.0.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.178.0"
+  },
+  "build": {
+    "appId": "com.chroma.rivalsmodmanager",
+    "productName": "Marvel Rivals Mod Manager",
+    "artifactName": "Marvel-Rivals-Mod-Manager-Setup-${version}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/7zip-bin/**",
+      "electron/bin/mesh-exporter/**",
+      "electron/data/MarvelRivals.usmap"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+release/
+out/
+
+tools/**/bin/
+tools/**/obj/
+
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
