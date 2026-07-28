@@ -262,6 +262,34 @@ function emitProgress (payload) {
   if (progressSink) progressSink(payload)
 }
 
+// A Nexus file's `uri` used to be a real filename ("Skin-9536-1-1781013727.zip"),
+// but newer uploads return an extensionless CDN object path
+// ("a7/47/6d/a7476d01-9daf-4c9f-b3d8-72f947b48140"). Only keep a name that still
+// carries an extension; otherwise build one we control.
+function downloadFileName (uri, headerName, modId, fileId) {
+  for (const candidate of [headerName, uri]) {
+    const base = String(candidate || '').split(/[\\/]/).pop().replace(/[\\/:*?"<>|]/g, '_').trim()
+    if (base && /\.[a-z0-9]{2,5}$/i.test(base)) return base
+  }
+  return `nexus-${modId}-${fileId}`
+}
+
+// Give a downloaded blob the extension its header says it deserves, so the rest
+// of the pipeline (and any error message the user sees) makes sense.
+function withArchiveExtension (filePath) {
+  if (/\.(zip|7z|rar|pak|utoc|ucas|sig)$/i.test(filePath)) return filePath
+  const { sniffArchive } = require('./archive')
+  const kind = sniffArchive(filePath)
+  if (!kind) return filePath
+  const renamed = `${filePath}.${kind === 'gzip' ? 'gz' : kind}`
+  try {
+    fs.renameSync(filePath, renamed)
+    return renamed
+  } catch {
+    return filePath
+  }
+}
+
 /**
  * Download a Nexus file and hand it to the mod library (or the UTOC patch installer).
  * Account authorization comes from the persistent signed Nexus session.
@@ -277,15 +305,14 @@ async function downloadMod ({ modId, fileId, fileName, modMeta }) {
     if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`)
     const total = Number(res.headers.get('content-length')) || 0
 
-    let name = fileName
-    if (!name) {
-      const cd = res.headers.get('content-disposition') || ''
-      const m = cd.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i)
-      name = m ? decodeURIComponent(m[1]) : `nexus-${modId}-${fileId}.zip`
-    }
-    name = name.replace(/[\\/:*?"<>|]/g, '_')
+    let headerName = null
+    const cd = res.headers.get('content-disposition') || ''
+    const m = cd.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i)
+    if (m) { try { headerName = decodeURIComponent(m[1]) } catch { headerName = m[1] } }
+
+    const name = downloadFileName(fileName, headerName, modId, fileId)
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rvm-dl-'))
-    const dest = path.join(tmpDir, name)
+    let dest = path.join(tmpDir, name)
 
     const file = fs.createWriteStream(dest)
     const reader = res.body.getReader()
@@ -303,6 +330,7 @@ async function downloadMod ({ modId, fileId, fileName, modMeta }) {
       }
     }
     await new Promise(resolve => file.end(resolve))
+    dest = withArchiveExtension(dest)
     emitProgress({ id: dlId, name: label, status: 'installing', received, total })
 
     const modLibrary = require('./modLibrary')
@@ -357,8 +385,7 @@ async function previewModFile ({ modId, fileId, fileName }) {
     if (!res.ok || !res.body) throw new Error(`Preview download failed (${res.status})`)
     const total = Number(res.headers.get('content-length')) || 0
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rvm-preview-'))
-    const name = (fileName || `nexus-${modId}-${fileId}.zip`).replace(/[\\/:*?"<>|]/g, '_')
-    const dest = path.join(tmpDir, name)
+    let dest = path.join(tmpDir, downloadFileName(fileName, null, modId, fileId))
     const file = fs.createWriteStream(dest); const reader = res.body.getReader(); let received = 0
     while (true) {
       const { done, value } = await reader.read(); if (done) break
@@ -367,10 +394,11 @@ async function previewModFile ({ modId, fileId, fileName }) {
       emitProgress({ id: dlId, name: label, status: 'downloading', received, total, preview: true })
     }
     await new Promise(resolve => file.end(resolve))
+    dest = withArchiveExtension(dest)
     emitProgress({ id: dlId, name: label, status: 'previewing', received, total, preview: true })
-    const { extractArchive, isArchive, walkFiles } = require('./archive')
+    const { extractArchive, looksLikeArchive, walkFiles } = require('./archive')
     let inputs = [dest]
-    if (isArchive(dest)) {
+    if (looksLikeArchive(dest)) {
       extractDir = await extractArchive(dest)
       inputs = walkFiles(extractDir)
     }

@@ -11,7 +11,7 @@ const { classifyPaths } = require('../electron/lib/pakParser')
 const { characterName, detectCharactersFromText } = require('../electron/lib/characters')
 const assetServer = require('../electron/lib/assetServer')
 const { pakFileName } = require('../electron/lib/audioEditor')
-const { resolve7zaPath } = require('../electron/lib/archive')
+const { resolve7zaPath, isArchive, looksLikeArchive, sniffArchive, extractArchive, walkFiles } = require('../electron/lib/archive')
 const { modelMaterials } = require('../electron/lib/previewManager')
 
 function chunk (id, data) {
@@ -165,4 +165,63 @@ test('bundled catalog includes every spreadsheet category, not only the first ta
   assert.equal(data.targets.some(x => x.kind === 'voice'), false)
   assert.equal(data.voiceLines.find(x => x.wemId === 954136546)?.usage, 'ultimate')
   assert.equal(data.voiceLines.find(x => x.wemId === 942494679)?.usage, 'ability')
+})
+
+test('extensionless Nexus CDN downloads are still recognized as archives', async () => {
+  const AdmZip = require('adm-zip')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rvm-sniff-'))
+  try {
+    const zip = new AdmZip()
+    zip.addFile('FINALVERSIONUI/Skin_9999999_P.pak', Buffer.from('pak'))
+    zip.addFile('FINALVERSIONUI/Skin_9999999_P.utoc', Buffer.from('utoc'))
+    // Nexus returns uri "a7/47/6d/<guid>" for newer files; slashes become _
+    const blob = path.join(dir, 'a7_47_6d_a7476d01-9daf-4c9f-b3d8-72f947b48140')
+    zip.writeZip(blob)
+
+    assert.equal(isArchive(blob), false, 'no extension to go on')
+    assert.equal(sniffArchive(blob), 'zip')
+    assert.equal(looksLikeArchive(blob), true)
+
+    const out = await extractArchive(blob)
+    const names = walkFiles(out).map(f => path.basename(f))
+    assert.ok(names.includes('Skin_9999999_P.pak'))
+    assert.ok(names.includes('Skin_9999999_P.utoc'))
+    fs.rmSync(out, { recursive: true, force: true })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a 7z uploaded under a .zip name extracts by header, not by extension', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rvm-mislabel-'))
+  try {
+    const mislabeled = path.join(dir, 'totally-a-zip.zip')
+    // 7z magic followed by junk: sniffing must win over the extension
+    fs.writeFileSync(mislabeled, Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0, 0]))
+    assert.equal(sniffArchive(mislabeled), '7z')
+    await assert.rejects(extractArchive(mislabeled), /"totally-a-zip\.zip" is damaged or incomplete/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('macOS resource forks and OS junk never count as mod files', async () => {
+  const AdmZip = require('adm-zip')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rvm-junk-'))
+  try {
+    const zip = new AdmZip()
+    zip.addFile('__MACOSX/._Skin_P.pak', Buffer.from('fork'))
+    zip.addFile('.DS_Store', Buffer.from('junk'))
+    zip.addFile('Thumbs.db', Buffer.from('junk'))
+    zip.addFile('Real/Skin_P.pak', Buffer.from('pak'))
+    const archive = path.join(dir, 'junky.zip')
+    zip.writeZip(archive)
+
+    const out = await extractArchive(archive)
+    const found = walkFiles(out).map(f => path.basename(f))
+    assert.deepEqual(found, ['Skin_P.pak'])
+    fs.rmSync(out, { recursive: true, force: true })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

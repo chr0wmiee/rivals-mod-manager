@@ -1,7 +1,7 @@
 {
   "name": "rivals-mod-manager",
   "productName": "Marvel Rivals Mod Manager",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "A Marvel Rivals mod manager with Nexus Mods integration",
   "main": "electron/main.js",
   "author": "chroma",
