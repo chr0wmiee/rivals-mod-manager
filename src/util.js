@@ -45,11 +45,40 @@ const escapeHtml = s => s
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 
+// Authors write descriptions in the Nexus web editor, which leaves raw HTML
+// (mostly <br />) mixed in with BBCode. Fold that layout markup into plain
+// newlines and drop every other tag BEFORE escaping, so tags never reach the
+// reader as literal text and no raw HTML survives into the output.
+function stripRawHtml (s) {
+  return s
+    // The editor writes "line\n<br />line", so a <br> next to a real newline is
+    // one break, not two. Consecutive <br><br> still survive as a real gap.
+    .replace(/[ \t]*\r?\n?[ \t]*<\s*br\s*\/?\s*>[ \t]*\r?\n?/gi, '\n')
+    .replace(/<\s*\/\s*(p|div|tr|li|h[1-6]|blockquote)\s*>/gi, '\n')
+    .replace(/<\s*(p|div|tr|li|h[1-6]|blockquote|hr)[^>]*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+}
+
+// Turn bare URLs into links, but only in text: never inside an existing anchor
+// and never inside a tag's attributes.
+function linkifyBareUrls (html) {
+  let inAnchor = false
+  return html.replace(/<a\b[^>]*>|<\/a\s*>|<[^>]*>|[^<]+/gi, token => {
+    if (token.startsWith('<')) {
+      if (/^<a\b/i.test(token)) inAnchor = true
+      else if (/^<\/a/i.test(token)) inAnchor = false
+      return token
+    }
+    if (inAnchor) return token
+    return token.replace(/https?:\/\/[^\s<]+[^\s<.,;:!?)\]]/g, u => `<a href="${u}" data-ext="1">${u}</a>`)
+  })
+}
+
 // Minimal BBCode renderer for Nexus mod descriptions. Input is escaped first,
 // then a whitelist of tags is converted, so no raw HTML can pass through.
 export function bbcodeToHtml (src) {
   if (!src) return ''
-  let s = escapeHtml(String(src))
+  let s = escapeHtml(stripRawHtml(String(src)))
 
   const safeUrl = u => (/^https?:\/\//i.test(u) ? u : '#')
 
@@ -78,7 +107,19 @@ export function bbcodeToHtml (src) {
     })
     .replace(/\[\/?(font|line|mention|member|article|table|tr|td|th)[^\]]*\]/gi, '')
 
-  return s.replace(/\r?\n/g, '<br/>')
+  s = linkifyBareUrls(s)
+
+  // A run of dashes on its own line is a divider. Raw HTML is already gone and
+  // everything else is escaped, so an <hr/> here can only be one we wrote.
+  s = s.split('\n').map(line => (/^\s*[-=_*~]{4,}\s*$/.test(line) ? '<hr/>' : line)).join('\n')
+
+  s = s.replace(/\r?\n/g, '<br/>')
+
+  // Editors leave long stretches of blank lines behind; two is plenty.
+  s = s.replace(/(?:<br\/>\s*){3,}/g, '<br/><br/>')
+  s = s.replace(/(?:<br\/>)*<hr\/>(?:<br\/>)*/g, '<hr/>')
+
+  return s.trim().replace(/^(?:<br\/>)+|(?:<br\/>)+$/g, '')
 }
 
 export const TYPE_LABELS = {

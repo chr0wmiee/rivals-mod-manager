@@ -595,6 +595,10 @@ select.input option { background: var(--bg2); }
 .desc-body { color: #c9cad1; line-height: 1.6; font-size: 13.5px; overflow-wrap: break-word; }
 .desc-body img { max-width: 100%; height: auto; }
 .desc-body b { color: var(--text); }
+.desc-body a { color: var(--gold-hi); text-decoration: none; overflow-wrap: anywhere; }
+.desc-body a:hover { text-decoration: underline; }
+.desc-body hr { border: 0; border-top: 1px solid var(--line2); margin: 14px 0; }
+.desc-body ul { margin: 6px 0 6px 18px; }
 
 .file-row {
   display: flex;

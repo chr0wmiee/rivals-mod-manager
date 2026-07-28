@@ -225,3 +225,35 @@ test('macOS resource forks and OS junk never count as mod files', async () => {
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('Nexus descriptions mixing raw HTML with BBCode render as readable text', async () => {
+  const { bbcodeToHtml } = await import('../src/util.js')
+  const src = [
+    '\u{1F6E1} VANGUARD ([b]TANK[/b]) MODS : ',
+    '<br />[i][b]DR STRANGE[/b][/i] ( Zombie Strange ) : [url=https://www.nexusmods.com/marvelrivals/mods/10487]https://www.nexusmods.com/marvelrivals/mods/10487[/url]',
+    '<br />[i][b]MAGNETO[/b][/i] ( Benary Sword ) : https://www.nexusmods.com/marvelrivals/mods/9557',
+    '<br />',
+    '<br />-----------------------------------------------------------',
+    '<br />',
+    '<br />\u2694 DUELIST MODS :'
+  ].join('\n')
+  const html = bbcodeToHtml(src)
+
+  assert.ok(!/&lt;br/.test(html), '<br /> must not survive as visible text')
+  assert.equal((html.match(/<a /g) || []).length, 2, 'both the BBCode link and the bare URL link')
+  assert.ok(!/<a[^>]*>[^<]*<a /.test(html), 'a BBCode link must not be linkified twice')
+  assert.equal((html.match(/<hr\/>/g) || []).length, 1, 'the dash run becomes one divider')
+  assert.ok(!/(?:<br\/>){3,}/.test(html), 'no towering stacks of line breaks')
+  assert.ok(html.includes('<b>TANK</b>') && html.includes('<i><b>DR STRANGE</b></i>'))
+})
+
+test('description markup cannot smuggle scripts or javascript: links', async () => {
+  const { bbcodeToHtml } = await import('../src/util.js')
+  const html = bbcodeToHtml('hi <script>alert(1)</script> <img src=x onerror=alert(2)> ' +
+    '<a href="javascript:alert(3)">x</a> [url=javascript:alert(4)]y[/url]')
+  assert.ok(!/<script/i.test(html))
+  assert.ok(!/<img/i.test(html))
+  assert.ok(!/onerror/i.test(html))
+  assert.ok(!/href="javascript:/i.test(html))
+  assert.ok(html.includes('<a href="#" data-ext="1">y</a>'), 'unsafe url falls back to #')
+})
