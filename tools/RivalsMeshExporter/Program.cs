@@ -89,6 +89,18 @@ internal static class Program
         provider.ReadNaniteData = true;
         provider.SkipReferencedTextures = false;
         provider.UseLazyPackageSerialization = false;
+        if (candidates.Length == 0)
+        {
+            candidates = provider.Files.Values.Where(file =>
+                file.Path.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase) ||
+                file.Path.EndsWith(".umap", StringComparison.OrdinalIgnoreCase)).ToArray();
+        }
+        if (args.Length >= 6 && !string.IsNullOrWhiteSpace(args[5]))
+        {
+            candidates = candidates
+                .Where(file => file.Path.Contains(args[5], StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
 
         var options = new ExporterOptions
         {
@@ -124,6 +136,10 @@ internal static class Program
                     var fullPath = Path.GetFullPath(savedFile);
                     WaitForCompletedWrite(fullPath);
                     if (!File.Exists(fullPath)) continue;
+                    if (export is USkeletalMesh skeletalMesh)
+                    {
+                        WriteMeshInspection(skeletalMesh, Path.ChangeExtension(fullPath, ".inspect.json"));
+                    }
                     exported.Add(new ExportedModel(
                         export.Name,
                         export is USkeletalMesh ? "SkeletalMesh" : "StaticMesh",
@@ -145,6 +161,56 @@ internal static class Program
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         }));
         return 0;
+    }
+
+    private static void WriteMeshInspection(USkeletalMesh mesh, string outputFile)
+    {
+        var bones = mesh.ReferenceSkeleton.FinalRefBoneInfo
+            .Select((bone, index) => new
+            {
+                index,
+                name = bone.Name.Text,
+                parent = bone.ParentIndex
+            })
+            .ToArray();
+
+        var lods = (mesh.LODModels ?? [])
+            .Select((lod, lodIndex) => new
+            {
+                lodIndex,
+                lod.NumVertices,
+                activeBoneIndices = lod.ActiveBoneIndices,
+                requiredBones = lod.RequiredBones,
+                sections = lod.Sections.Select((section, sectionIndex) => new
+                {
+                    sectionIndex,
+                    section.MaterialIndex,
+                    section.BaseIndex,
+                    section.NumTriangles,
+                    section.BaseVertexIndex,
+                    section.NumVertices,
+                    section.MaxBoneInfluences,
+                    boneMap = section.BoneMap
+                }).ToArray(),
+                vertices = lod.VertexBufferGPUSkin.VertsFloat.Select((vertex, vertexIndex) => new
+                {
+                    vertexIndex,
+                    position = new[] { vertex.Pos.X, vertex.Pos.Y, vertex.Pos.Z },
+                    uv0 = vertex.UV.Length > 0
+                        ? new[] { vertex.UV[0].U, vertex.UV[0].V }
+                        : Array.Empty<float>(),
+                    boneIndices = vertex.Infs?.BoneIndex ?? [],
+                    boneWeights = vertex.Infs?.BoneWeight ?? []
+                }).ToArray()
+            })
+            .ToArray();
+
+        File.WriteAllText(outputFile, JsonSerializer.Serialize(new
+        {
+            mesh.Name,
+            bones,
+            lods
+        }));
     }
 
     private static void WaitForCompletedWrite(string file)

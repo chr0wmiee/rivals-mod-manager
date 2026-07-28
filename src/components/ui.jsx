@@ -106,7 +106,7 @@ export function TypeChips ({ detection }) {
     <div className="chips">
       {(detection.characters || []).map(c => (
         <span key={c.id} className="chip char" title={detection.charSource === 'name' ? 'Guessed from the mod name' : `Character ID ${c.id}`}>
-          {c.name}{detection.charSource === 'name' ? ' ?' : ''}
+          {c.name}
         </span>
       ))}
       {types

@@ -5,7 +5,7 @@ const path = require('path')
 const crypto = require('crypto')
 const store = require('./store')
 const { describeRoot } = require('./gameLocator')
-const { isArchive, extractArchive, walkFiles } = require('./archive')
+const { looksLikeArchive, extractArchive, walkFiles } = require('./archive')
 const { analyzeModFiles, DETECTION_VERSION } = require('./pakParser')
 
 const CONTAINER_EXTS = ['.pak', '.utoc', '.ucas', '.sig']
@@ -336,6 +336,41 @@ function collectContainers (rootDir) {
   return { containers, images, all }
 }
 
+// Uploads that wrap the real mod in a second archive ("skin.zip" holding
+// "skin_v2.rar") are common. Unpack those in place until containers turn up.
+async function expandNestedArchives (rootDir, depth = 0) {
+  if (depth >= 2) return
+  const nested = walkFiles(rootDir).filter(f =>
+    !CONTAINER_EXTS.includes(path.extname(f).toLowerCase()) && looksLikeArchive(f))
+  if (nested.length === 0) return
+
+  for (const file of nested) {
+    let inner = null
+    try {
+      inner = await extractArchive(file)
+    } catch {
+      continue // not really an archive, or corrupt: leave it alone
+    }
+    const target = path.join(path.dirname(file), path.basename(file, path.extname(file)) + '__unpacked')
+    try {
+      fs.mkdirSync(target, { recursive: true })
+      fs.cpSync(inner, target, { recursive: true })
+      fs.rmSync(file, { force: true })
+    } catch { /* keep whatever landed */ } finally {
+      fs.rmSync(inner, { recursive: true, force: true })
+    }
+  }
+  await expandNestedArchives(rootDir, depth + 1)
+}
+
+// Explain what actually came out of the archive instead of just saying no.
+function describeContents (files, rootDir) {
+  const names = files.slice(0, 6).map(f => path.relative(rootDir, f) || path.basename(f))
+  if (names.length === 0) return 'It is empty.'
+  const more = files.length > names.length ? `, and ${files.length - names.length} more` : ''
+  return `It contains: ${names.join(', ')}${more}.`
+}
+
 // Group sibling container files by directory + stem so trios rename together.
 function planFileNames (containers) {
   const groups = new Map()
@@ -379,15 +414,23 @@ async function importItem (sourcePath, siblingFiles, meta) {
   let images = []
   let displayName = meta?.name || path.basename(sourcePath).replace(/\.[a-z0-9]+$/i, '')
 
-  if (isArchive(sourcePath)) {
+  let allFiles = []
+
+  if (looksLikeArchive(sourcePath)) {
     workDir = await extractArchive(sourcePath)
-    const found = collectContainers(workDir)
+    let found = collectContainers(workDir)
+    if (!found.containers.some(f => /\.(pak|utoc)$/i.test(f))) {
+      await expandNestedArchives(workDir)
+      found = collectContainers(workDir)
+    }
     containers = found.containers
     images = found.images
+    allFiles = found.all
   } else if (fs.statSync(sourcePath).isDirectory()) {
     const found = collectContainers(sourcePath)
     containers = found.containers
     images = found.images
+    allFiles = found.all
   } else if (CONTAINER_EXTS.includes(ext)) {
     // loose file(s): gather the trio siblings that were dropped along with it
     const stem = path.basename(sourcePath, ext).toLowerCase()
@@ -398,13 +441,14 @@ async function importItem (sourcePath, siblingFiles, meta) {
       CONTAINER_EXTS.includes(path.extname(f).toLowerCase()))
     containers = [...new Set([sourcePath, ...sibs])]
   } else {
-    throw new Error(`"${path.basename(sourcePath)}" is not a mod archive or .pak/.utoc/.ucas file.`)
+    throw new Error(`"${path.basename(sourcePath)}" is not a mod archive or a .pak/.utoc/.ucas file.`)
   }
 
   const hasRealContainer = containers.some(f => /\.(pak|utoc)$/i.test(f))
   if (!hasRealContainer) {
+    const detail = workDir ? ' ' + describeContents(allFiles, workDir) : ''
     if (workDir) fs.rmSync(workDir, { recursive: true, force: true })
-    throw new Error(`No .pak or .utoc files found in "${path.basename(sourcePath)}".`)
+    throw new Error(`No .pak or .utoc files found in "${path.basename(sourcePath)}".${detail}`)
   }
 
   // sanity: a .utoc without its .ucas will crash the game
