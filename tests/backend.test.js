@@ -13,6 +13,7 @@ const assetServer = require('../electron/lib/assetServer')
 const { pakFileName } = require('../electron/lib/audioEditor')
 const { resolve7zaPath, isArchive, looksLikeArchive, sniffArchive, extractArchive, walkFiles } = require('../electron/lib/archive')
 const { modelMaterials } = require('../electron/lib/previewManager')
+const { enableLauncherBypass } = require('../electron/lib/gameLocator')
 
 function chunk (id, data) {
   const header = Buffer.alloc(8); header.write(id, 0, 'ascii'); header.writeUInt32LE(data.length, 4)
@@ -35,6 +36,15 @@ test('Season 9 character mappings are current and not swapped', () => {
   assert.equal(characterName(1063), 'Cyclops')
   assert.equal(characterName(1064), 'Jubilee')
   assert.equal(characterName(1066), 'The Hood')
+})
+
+test('launching marks the game to skip its separate launcher', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rmm-launch-'))
+  const record = path.join(root, 'launch_record')
+  fs.writeFileSync(record, '6\n')
+  enableLauncherBypass(root)
+  assert.equal(fs.readFileSync(record, 'utf8'), '0\n')
+  fs.rmSync(root, { recursive: true, force: true })
 })
 
 test('community parsers produce friendly heroes, costumes and audio targets', () => {

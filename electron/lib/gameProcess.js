@@ -5,7 +5,7 @@ const { shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const store = require('./store')
-const { describeRoot, detectStore, STEAM_APP_ID, SHIPPING_EXE, LAUNCHER_EXE } = require('./gameLocator')
+const { describeRoot, detectStore, enableLauncherBypass, STEAM_APP_ID, SHIPPING_EXE, LAUNCHER_EXE } = require('./gameLocator')
 
 const PROCESS_NAMES = [SHIPPING_EXE, LAUNCHER_EXE, 'MarvelRivals.exe', 'MarvelGame.exe']
 
@@ -28,15 +28,16 @@ async function launch () {
   const root = store.get('gameRoot')
   if (!root) throw new Error('Game folder is not configured.')
   const info = describeRoot(root)
+  enableLauncherBypass(root)
   if (detectStore(root) === 'steam') {
     await shell.openExternal(`steam://rungameid/${STEAM_APP_ID}`)
-    return { via: 'steam' }
+    return { via: 'steam-direct' }
   }
   const launcher = info.launcherPath
   if (launcher && fs.existsSync(launcher)) {
     const child = spawn(launcher, [], { detached: true, stdio: 'ignore', cwd: path.dirname(launcher) })
     child.unref()
-    return { via: 'launcher' }
+    return { via: 'launcher-direct' }
   }
   if (fs.existsSync(info.shippingExe)) {
     const child = spawn(info.shippingExe, [], { detached: true, stdio: 'ignore', cwd: path.dirname(info.shippingExe) })

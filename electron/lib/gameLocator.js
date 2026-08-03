@@ -10,6 +10,7 @@ const REL_PAKS = path.join('MarvelGame', 'Marvel', 'Content', 'Paks')
 const REL_BIN = path.join('MarvelGame', 'Marvel', 'Binaries', 'Win64')
 const SHIPPING_EXE = 'Marvel-Win64-Shipping.exe'
 const LAUNCHER_EXE = 'MarvelRivals_Launcher.exe'
+const LAUNCH_RECORD = 'launch_record'
 
 function exists (p) {
   try { fs.accessSync(p); return true } catch { return false }
@@ -27,6 +28,24 @@ function describeRoot (dir) {
     binPath: path.join(dir, REL_BIN),
     launcherPath: exists(path.join(dir, LAUNCHER_EXE)) ? path.join(dir, LAUNCHER_EXE) : null,
     shippingExe: path.join(dir, REL_BIN, SHIPPING_EXE)
+  }
+}
+
+// Marvel Rivals checks this small file before opening its separate launcher.
+// Writing 0 keeps the normal Steam/Epic launch route (and its anti-cheat), but
+// tells the game to continue straight into the client instead of showing it.
+function enableLauncherBypass (gameRoot) {
+  const recordPath = path.join(gameRoot, LAUNCH_RECORD)
+  try {
+    // Some existing launcher-skip installs mark the file read-only. Make this
+    // launch resilient without leaving it read-only, so game updates can reset it.
+    if (exists(recordPath)) {
+      try { fs.chmodSync(recordPath, 0o666) } catch { /* write will report the useful error */ }
+    }
+    fs.writeFileSync(recordPath, '0\n', { encoding: 'utf8', mode: 0o666 })
+    return recordPath
+  } catch (err) {
+    throw new Error(`Could not enable direct launch: ${err.message}`)
   }
 }
 
@@ -180,11 +199,13 @@ module.exports = {
   resolveGameRoot,
   diagnosePath,
   describeRoot,
+  enableLauncherBypass,
   isGameRoot,
   detectStore,
   STEAM_APP_ID,
   SHIPPING_EXE,
   LAUNCHER_EXE,
+  LAUNCH_RECORD,
   REL_PAKS,
   REL_BIN
 }
